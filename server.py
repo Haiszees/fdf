@@ -31,11 +31,22 @@ def get_stats() -> dict:
         conn = psycopg2.connect(DATABASE_URL, connect_timeout=3)
         cur  = conn.cursor()
 
-        cur.execute("SELECT COUNT(*) FROM chats")
-        chats = cur.fetchone()[0]
+        # Проверяем какие таблицы есть
+        cur.execute("SELECT tablename FROM pg_tables WHERE schemaname='public'")
+        tables = [r[0] for r in cur.fetchall()]
+        print(f"Tables: {tables}")
 
-        cur.execute("SELECT COUNT(DISTINCT user_id) FROM message_activity")
-        users = cur.fetchone()[0]
+        chats = 0
+        if 'chats' in tables:
+            cur.execute("SELECT COUNT(*) FROM chats")
+            chats = cur.fetchone()[0]
+            print(f"Chats count: {chats}")
+
+        users = 0
+        if 'message_activity' in tables:
+            cur.execute("SELECT COUNT(DISTINCT user_id) FROM message_activity")
+            users = cur.fetchone()[0]
+            print(f"Users count: {users}")
 
         conn.close()
         data = {"chats": chats, "users": users}

@@ -18,7 +18,7 @@ STATS_TTL   = 300  # 5 мин
 
 
 def get_stats() -> dict:
-    """Счётчики из PostgreSQL. Кешируем на 5 минут."""
+    """Счётчики из PostgreSQL через asyncpg-совместимый socket. Кешируем на 5 минут."""
     now = time.time()
     if _stats_cache["data"] and now - _stats_cache["ts"] < STATS_TTL:
         return _stats_cache["data"]
@@ -27,33 +27,32 @@ def get_stats() -> dict:
         return {"chats": 0, "users": 0}
 
     try:
-        import psycopg2
-        conn = psycopg2.connect(DATABASE_URL, connect_timeout=3)
-        cur  = conn.cursor()
+        # Используем pg8000 — чистый Python, без C-расширений
+        import pg8000.native as pg
+        import urllib.parse as up
 
-        # Проверяем какие таблицы есть
-        cur.execute("SELECT tablename FROM pg_tables WHERE schemaname='public'")
-        tables = [r[0] for r in cur.fetchall()]
-        print(f"Tables: {tables}")
+        u = up.urlparse(DATABASE_URL)
+        conn = pg.Connection(
+            user=u.username,
+            password=u.password,
+            host=u.hostname,
+            port=u.port or 5432,
+            database=u.path.lstrip('/'),
+            ssl_context=True,
+            timeout=5,
+        )
 
-        chats = 0
-        if 'chats' in tables:
-            cur.execute("SELECT COUNT(*) FROM chats")
-            chats = cur.fetchone()[0]
-            print(f"Chats count: {chats}")
-
-        users = 0
-        if 'message_activity' in tables:
-            cur.execute("SELECT COUNT(DISTINCT user_id) FROM message_activity")
-            users = cur.fetchone()[0]
-            print(f"Users count: {users}")
-
+        chats = conn.run("SELECT COUNT(*) FROM chats")[0][0]
+        users = conn.run("SELECT COUNT(DISTINCT user_id) FROM message_activity")[0][0]
         conn.close()
-        data = {"chats": chats, "users": users}
+
+        print(f"Stats: chats={chats} users={users}")
+        data = {"chats": int(chats), "users": int(users)}
         _stats_cache.update({"data": data, "ts": now})
         return data
+
     except ImportError:
-        print("ERROR: psycopg2 not installed. Add psycopg2-binary to requirements.txt")
+        print("ERROR: pg8000 not installed")
         return {"chats": 0, "users": 0}
     except Exception as e:
         print(f"DB error: {type(e).__name__}: {e}")
